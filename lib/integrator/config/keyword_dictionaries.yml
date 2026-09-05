@@ -1,0 +1,76 @@
+# Keyword dictionaries for Integrator::Analysis::EndpointClassifier.
+#
+# These are heuristics, not certainties — that's why every match also
+# carries a confidence level. Add new keywords/suffixes here to support a
+# provider spec with different naming conventions; no code change needed.
+# All keywords are matched case-insensitively as substrings.
+
+callback:
+  path_keywords: [webhook, callback, notification, event]
+  tag_keywords: [webhook, callback, notification]
+
+cancel:
+  path_suffixes: [cancel, void, reverse, refund, abort]
+
+create:
+  path_keywords: [payout, payment, transfer, disburs, charge, order, transaction, send]
+  tag_keywords: [payout, payment, transfer, disburs, charge, order, transaction]
+  # Used only as a medium-confidence fallback when no path/tag keyword
+  # matched, by checking the request body's own field names.
+  amount_field_aliases: [amount, sum, value, total]
+
+balance:
+  path_keywords: [balance, wallet, account]
+  tag_keywords: [balance, wallet, account]
+
+# Used by Analysis::StatusMapper. Bucketing order matters when a status
+# string could plausibly match two buckets — first match wins, so keep
+# unambiguous/more specific words first within each list if that ever
+# becomes a problem.
+statuses:
+  in_progress: [pending, processing, queued, created, initiated, new, in_progress]
+  approved: [completed, success, succeeded, approved, done, paid, confirmed]
+  rejected: [failed, rejected, declined, cancelled, canceled, error, expired]
+
+# Used by Analysis::ErrorMapper. `by_provider_code_keywords` is checked
+# first (it's more specific than a bare HTTP status), then
+# `by_http_status`, then `default_for_5xx` as a last resort before giving up.
+error_actions:
+  by_provider_code_keywords:
+    reject: [not_found, invalid, validation, unsupported, malformed]
+    retry_with_backoff: [rate_limit, throttle, insufficient_balance, insufficient_funds]
+    alert_and_block: [unauthorized, forbidden, invalid_credentials, blocked, fraud]
+    retry: [unavailable, timeout, internal_error, bank_unavailable]
+  by_http_status:
+    400: reject
+    401: alert_and_block
+    402: retry_with_backoff
+    403: alert_and_block
+    404: reject
+    409: reject
+    422: reject
+    429: retry_with_backoff
+  default_for_5xx: retry
+
+# Used by Analysis::FieldMapper. Canonical name -> list of provider field
+# names it might be spelled as. Matched case-insensitively, exact property
+# name only (not substring) — field names are short and substring matching
+# here would cause false positives (e.g. "external_id" inside some longer name).
+field_aliases:
+  amount: [amount, sum, value, total]
+  currency: [currency, curr]
+  external_id: [external_id, merchant_id, reference, ref, order_id, client_id]
+  phone: [phone, msisdn, recipient_phone]
+  bank_code: [bank_code, bic, routing_number, sort_code]
+  bank_name: [bank_name]
+  card_number: [card_number, pan]
+
+# Used by Analysis::FieldMapper to guess whether an amount field is in
+# minor units (kopecks/cents) or major units, from the field's own
+# description text. If neither list matches, the unit is left :unresolved
+# rather than guessed — a wrong guess here means every generated payout is
+# off by a factor of 100.
+amount_unit_keywords:
+  minor: [kopeck, kopecks, копе, cent, cents, minor unit, subunit]
+  major: [major unit, whole unit, rubles, dollars]
+

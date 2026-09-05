@@ -1,0 +1,75 @@
+openapi: 3.0.3
+info:
+  title: Generic Disbursement Gateway
+  version: 0.1.0
+paths:
+  /disbursements:
+    post:
+      operationId: createDisbursement
+      tags: [Disbursements]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sum, msisdn]
+              properties:
+                sum:
+                  type: number
+                msisdn:
+                  type: string
+      responses:
+        "201":
+          description: created
+
+  /disbursements/{ref}:
+    get:
+      operationId: getDisbursement
+      tags: [Disbursements]
+      responses:
+        "200":
+          description: ok
+
+  /disbursements/{ref}/void:
+    post:
+      operationId: voidDisbursement
+      tags: [Disbursements]
+      responses:
+        "200":
+          description: voided
+
+  /gateway/callback:
+    post:
+      operationId: gatewayCallback
+      tags: [Integration]
+      security: []
+      responses:
+        "200":
+          description: received
+
+  /funds-summary:
+    get:
+      operationId: getFundsSummary
+      tags: [Disbursements]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  balance:
+                    type: integer
+
+  # Genuinely ambiguous on purpose: GET with a path param but the last
+  # segment is a literal action, not a bare {id} — should NOT be classified
+  # as :status, and should NOT match anything else either. This is the case
+  # the classifier is supposed to admit it can't handle.
+  /disbursements/{ref}/receipt:
+    get:
+      operationId: downloadReceipt
+      tags: [Disbursements]
+      responses:
+        "200":
+          description: receipt file
