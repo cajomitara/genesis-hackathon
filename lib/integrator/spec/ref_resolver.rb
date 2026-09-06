@@ -1,24 +1,17 @@
 module Integrator
   module Spec
-    # разворачивает спецификацию, заменяя все ссылки на то, на что они ссылаются
-
-    # Resolves every local `$ref` (`#/components/...`) in a raw, Psych-loaded
-    # OpenAPI document into a plain nested Hash/Array tree with no `$ref`
-    # nodes left. This is the only place in the codebase that understands
-    # JSON Pointer syntax — everything downstream works with plain data.
+    # разворачивает локальные $ref в обычное дерево hash/array без ссылок
     class RefResolver
-      # Raised only for malformed input (a $ref the resolver cannot follow
-      # at all, e.g. an external file reference). Circular references are
-      # NOT errors — they're broken deliberately, see #resolve_ref.
+      # возникает только при ссылке, которую нельзя разрешить
+      # циклические ссылки обрабатываются отдельно
       class UnresolvableRefError < StandardError; end
 
       def initialize(document)
         @document = document
       end
 
-      # Returns a deep copy of `node` with every {"$ref" => "#/a/b/c"} replaced
-      # by its resolved target. `path_stack` tracks the chain of refs already
-      # being resolved on the current branch, to detect cycles.
+      # возвращает копию node с разрешёнными локальными $ref
+      # path_stack используется для обнаружения циклов
       def resolve(node, path_stack = [])
         case node
         when Hash
@@ -39,6 +32,7 @@ module Integrator
       def resolve_ref(ref, path_stack)
         raise UnresolvableRefError, "only local refs (#/...) are supported: #{ref}" unless ref.start_with?("#/")
 
+        # при циклической ссылке останавливаем разворачивание и оставляем маркер
         return { "_circular_ref" => ref } if path_stack.include?(ref)
 
         target = dig_pointer(ref)
@@ -57,7 +51,7 @@ module Integrator
         end
       end
 
-      # JSON Pointer escaping: ~1 -> /, ~0 -> ~ (order matters: ~1 first)
+      # экранирование json pointer
       def unescape_pointer_segment(segment)
         segment.gsub("~1", "/").gsub("~0", "~")
       end

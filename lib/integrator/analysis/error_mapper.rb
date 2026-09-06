@@ -4,15 +4,8 @@ require_relative "warning_collector"
 
 module Integrator
   module Analysis
-    # Decides what a generated service should DO with an error response:
-    # give up (:reject), try again (:retry / :retry_with_backoff), or stop
-    # and page someone (:alert_and_block).
-    #
-    # Provider error codes are checked first (more specific — e.g.
-    # "insufficient_balance" is meaningfully different from a generic 402),
-    # then a fixed table of HTTP statuses, then a 5xx catch-all. If none of
-    # those apply, the action is :unresolved and a Warning is recorded —
-    # this class never invents an action it isn't confident about.
+    # определяет действие для ошибки: reject, retry или alert_and_block
+    # сначала проверяется код провайдера, затем http-статус и правило для 5xx
     class ErrorMapper
       DEFAULT_RULES_PATH = File.join(__dir__, "..", "config", "keyword_dictionaries.yml")
 
@@ -23,8 +16,7 @@ module Integrator
 
       attr_reader :warnings
 
-      # http_status: Integer (e.g. 402)
-      # provider_code: String | nil (e.g. "insufficient_balance")
+      # http_status — http-статус. provider_code — код ошибки провайдера или nil
       def action_for(http_status, provider_code)
         action = action_by_provider_code(provider_code) || action_by_http_status(http_status)
 

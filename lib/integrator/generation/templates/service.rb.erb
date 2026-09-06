@@ -1,0 +1,132 @@
+# app/services/provider/<%= @analysis.class_name.downcase %>_service.rb
+# автосгенерировано integrator. TODO требуют ручной проверки.
+
+class Provider
+  class <%= @analysis.class_name %>Service < BaseService
+    BASE_URL = ENV.fetch('<%= @analysis.env_prefix %>_BASE_URL', '<%= @analysis.base_url %>')
+<% if @analysis.create -%>
+
+    def create_request(operation, request_method = 'create')
+      payload = build_payout_payload(operation)
+      response = client.post(
+        "#{BASE_URL}<%= @analysis.create.endpoint.path %>",
+        json: payload,
+        headers: auth_headers<% if @analysis.idempotency_header %>.merge('<%= @analysis.idempotency_header %>' => SecureRandom.uuid)<% end %>
+      )
+      parse_create_response(operation, response)
+    rescue Provider::RateLimitError
+      failure(:too_many_requests, 'provider.rate_limit')
+    rescue Provider::UnauthorizedError
+      failure(:unauthorized, 'provider.invalid_credentials')
+    end
+<% else -%>
+
+    # todo: эндпоинт создания операции не найден, create_request не сгенерирован.
+<% end -%>
+<% if @analysis.status -%>
+
+    def fetch_status(operation)
+      response = client.get(
+        "#{BASE_URL}<%= substitute_operation_id(@analysis.status.endpoint.path) %>",
+        headers: auth_headers
+      )
+      map_status(response.body['status'])
+    end
+<% else -%>
+
+    # todo: эндпоинт статуса не найден, fetch_status не сгенерирован.
+<% end -%>
+<% if @analysis.cancel -%>
+
+    def cancel_request(operation)
+      response = client.post(
+        "#{BASE_URL}<%= substitute_operation_id(@analysis.cancel.endpoint.path) %>",
+        headers: auth_headers
+      )
+      parse_cancel_response(operation, response)
+    end
+<% end -%>
+<% if @analysis.callback -%>
+
+    def process_callback(payload)
+      verify_signature!(payload) # <%= @analysis.webhook_signature_algorithm.to_s.upcase %> из <%= @analysis.webhook_signature_header || "заголовка подписи (не определён — уточните вручную)" %>
+<% if @analysis.event_status_map.any? -%>
+      case payload['event']
+<% @analysis.event_status_map.each do |event, canonical| -%>
+      when '<%= event %>' then <%= action_snippet(canonical) %>
+<% end -%>
+      else failure(:unprocessable_entity, 'unknown_event')
+      end
+<% else -%>
+      # todo: значения поля события не описаны, обработайте вручную
+      failure(:unprocessable_entity, 'unknown_event')
+<% end -%>
+    end
+<% else -%>
+
+    # todo: webhook-эндпоинт не найден, process_callback не сгенерирован.
+<% end -%>
+
+    def check_conditions(operation, request_method)
+      base_result = super
+      return base_result if base_result.failed?
+<% if @analysis.amount_minimum -%>
+      return failure(:unprocessable_entity, 'amount_too_low') if operation.amount < <%= @analysis.amount_minimum %>
+<% end -%>
+      success
+    end
+
+    private
+
+<% if @analysis.create -%>
+    def build_payout_payload(operation)
+      {
+<% if @analysis.field_mapping.amount_field -%>
+<% if amount_unit_unresolved? -%>
+        # todo: единица суммы не определена в спецификации, проверьте перед использованием
+<% end -%>
+        <%= @analysis.field_mapping.amount_field %>: <%= amount_expression %>,
+<% end -%>
+<% if @analysis.field_mapping.currency_field -%>
+<% unless default_currency -%>
+        # todo: фиксированная валюта не определена в спецификации
+<% end -%>
+        <%= @analysis.field_mapping.currency_field %>: <%= currency_expression %>,
+<% end -%>
+<% if @analysis.field_mapping.external_id_field -%>
+        <%= @analysis.field_mapping.external_id_field %>: operation.id,
+<% end -%>
+<% if @analysis.field_mapping.recipient_fields.any? -%>
+<% if @analysis.field_mapping.recipient_container_field -%>
+        <%= @analysis.field_mapping.recipient_container_field %>: {
+<% if @analysis.recipient_type_field -%>
+          <%= @analysis.recipient_type_field %>: '<%= @analysis.recipient_type_value %>',
+<% end -%>
+<% @analysis.field_mapping.recipient_fields.each do |canonical, provider_field| -%>
+          <%= provider_field %>: operation.payout_requisite.dig('<%= @analysis.recipient_type_value %>', '<%= canonical %>'),
+<% end -%>
+        },
+<% else -%>
+<% # вложенного контейнера нет, поля реквизитов выводятся на верхнем уровне -%>
+<% @analysis.field_mapping.recipient_fields.each do |canonical, provider_field| -%>
+        <%= provider_field %>: operation.payout_requisite.dig('default', '<%= canonical %>'),
+<% end -%>
+<% end -%>
+<% end -%>
+      }
+    end
+<% end -%>
+
+    STATUS_MAP = {
+<% @analysis.status_map.each do |provider_status, canonical| -%>
+      '<%= provider_status %>' => '<%= canonical %>',
+<% end -%>
+    }.freeze
+
+    ERROR_MAP = {
+<% @analysis.error_rows.each do |row| -%>
+      <%= row[:http_status] %> => <%= row[:provider_code] ? "'#{row[:provider_code]}'" : "nil" %>,<% if row[:provider_code].nil? %> # код провайдера не указан; действие: <%= row[:action] %><% end %>
+<% end -%>
+    }.freeze
+  end
+end

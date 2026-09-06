@@ -1,0 +1,62 @@
+# <%= @provider_name %>: интеграция
+
+## Авторизация
+<% if @analysis.security_scheme -%>
+- Тип: <%= auth_type_label(@analysis.security_scheme) %>
+- Header: `<%= @analysis.security_scheme.param_name %>: <credentials.api_key>`
+<% else -%>
+- TODO: не удалось определить схему авторизации из спецификации — заполните вручную.
+<% end -%>
+- Хранение: `providers.credentials` (encrypted)
+
+## Методы
+
+| Метод | Эндпоинт | Назначение | Идемпотентность |
+|-------|-----------|------------|-----------------|
+<% method_rows.each do |row| -%>
+| <%= row[:name] %> | <%= row[:http] %> | <%= row[:purpose] %> | <%= row[:idempotency] %> |
+<% end -%>
+
+## Маппинг статусов
+
+| Провайдер | Space Payments |
+|----------|----------------|
+<% @analysis.status_map.each do |provider_status, canonical| -%>
+| <%= provider_status %> | <%= canonical %> |
+<% end -%>
+<% if @analysis.status_map.empty? -%>
+| _(не удалось извлечь ни одного статуса из спецификации)_ | |
+<% end -%>
+
+## Обработка ошибок
+
+| HTTP | Код провайдера | Действие |
+|------|----------------|----------|
+<% @analysis.error_rows.each do |row| -%>
+| <%= row[:http_status] %> | <%= row[:provider_code] || "_не указан в спеке_" %> | <%= action_label(row[:action]) %> |
+<% end -%>
+
+## ProviderGateway
+
+```json
+{ "external_method": "TODO", "gateway": "TODO" }
+```
+> `external_method` и `gateway` не определяются по API-спецификации. заполните вручную.
+
+## Подпись webhook
+<% if @analysis.callback -%>
+<%= @analysis.webhook_signature_algorithm == :unresolved ? "HMAC(body, callback_secret)" : @analysis.webhook_signature_algorithm.to_s.upcase.sub("_", "-") + "(body, callback_secret)" %> → hex → `<%= @analysis.webhook_signature_header || "TODO: заголовок подписи не определён" %>`
+<% else -%>
+- В спецификации не найден webhook-эндпоинт.
+<% end -%>
+
+## Неподдерживаемые / неоднозначные элементы спецификации
+<% if @analysis.warnings.empty? -%>
+Не обнаружено.
+<% else -%>
+| Этап | Элемент | Причина |
+|------|---------|---------|
+<% @analysis.warnings.to_a.each do |w| -%>
+| <%= w.stage %> | <%= w.subject %> | <%= w.reason %> |
+<% end -%>
+<% end -%>

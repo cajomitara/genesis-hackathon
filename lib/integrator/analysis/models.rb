@@ -1,37 +1,66 @@
 module Integrator
   module Analysis
-    # A single "couldn't confidently decide" record. Every analyzer in this
-    # layer (classifier now; status/error/field mappers later) appends here
-    # instead of raising or silently skipping. Never suppressed, never fatal.
+    # запись о результате, который нельзя определить уверенно
+    # анализаторы добавляют её сюда вместо исключения или пропуска
     Warning = Struct.new(
-      :stage,      # :classification | :status_mapping | :error_mapping | :field_mapping
-      :subject,    # e.g. "POST /balance" or "status=on_hold"
-      :reason,     # human-readable explanation, in the language the report is generated in
+      :stage,      # этап анализа
+      :subject,    # объект анализа
+      :reason,     # причина в языке отчёта
       keyword_init: true
     )
 
     EndpointAnalysis = Struct.new(
-      :endpoint,       # Integrator::Spec::Endpoint — read-only reference to the IR object
-      :role,           # :create | :status | :cancel | :callback | :balance | :unclassified
-      :confidence,     # :high | :medium | :low
-      :matched_rule,   # String — human-readable, for debugging/logging why this role was picked
+      :endpoint,       # ссылка на объект Integrator::Spec::Endpoint
+      :role,           # роль эндпоинта
+      :confidence,     # уровень уверенности
+      :matched_rule,   # правило, по которому выбрана роль
       keyword_init: true
     )
 
     ErrorAction = Struct.new(
-      :http_status,    # Integer
-      :provider_code,  # String | nil
-      :action,         # :reject | :retry | :retry_with_backoff | :alert_and_block | :unresolved
+      :http_status,    # http-статус
+      :provider_code,  # код ошибки провайдера
+      :action,         # действие при ошибке
       keyword_init: true
     )
 
     FieldMapping = Struct.new(
-      :amount_field,        # String | nil — provider's field name for the payout amount
-      :amount_unit,         # :minor | :major | :unresolved
-      :currency_field,      # String | nil
-      :external_id_field,   # String | nil
-      :recipient_fields,    # { Symbol(canonical) => String(provider_field_name) }
-                            #   canonical keys: :phone, :bank_code, :bank_name, :card_number
+      :amount_field,        # поле суммы у провайдера
+      :amount_unit,         # единица суммы
+      :currency_field,      # поле валюты
+      :external_id_field,   # внешнее поле идентификатора
+      :recipient_container_field, # контейнер реквизитов у провайдера
+                            # nil означает плоские поля
+                            # nil означает, что вложенного объекта нет
+      :recipient_fields,    # соответствие канонических и полей провайдера
+                            #   канонические ключи: :phone, :bank_code, :bank_name, :card_number
+      keyword_init: true
+    )
+
+    # единый объект для генерации
+    # содержит результаты классификации и маппинга по спецификации
+    SpecAnalysis = Struct.new(
+      :info,                    # данные спецификации
+      :class_name,              # имя класса из info[:title]
+      :env_prefix,              # префикс переменной окружения
+      :base_url,                # sandbox URL или первый сервер
+      :security_scheme,         # схема авторизации для :create
+      :create,                  # анализ эндпоинта создания
+      :status,                  # анализ эндпоинта статуса
+      :cancel,                  # анализ эндпоинта отмены
+      :callback,                # анализ callback
+      :balance,                 # анализ баланса
+      :field_mapping,           # маппинг полей
+      :recipient_type_field,    # поле типа реквизитов
+      :recipient_type_value,    # значение типа реквизитов
+      :status_map,              # соответствие статусов
+      :event_status_map,        # соответствие событий webhook статусам
+      :error_rows,              # строки обработки ошибок, отсортированные по HTTP-статусу
+      :webhook_signature_header,    # заголовок подписи webhook
+      :webhook_signature_algorithm, # алгоритм подписи webhook
+      :idempotency_header,      # заголовок идемпотентности
+      :amount_minimum,          # минимальная сумма из схемы
+      :warnings,                # общий сборщик предупреждений
       keyword_init: true
     )
   end

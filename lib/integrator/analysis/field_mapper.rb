@@ -4,24 +4,13 @@ require_relative "warning_collector"
 
 module Integrator
   module Analysis
-    # Aliases a provider's own field names (whatever the "create" endpoint's
-    # request schema happens to call them) onto the canonical names the
-    # generated service needs to fill in: amount, currency, external_id,
-    # and the recipient's phone/bank_code/bank_name/card_number.
-    #
-    # Also tries to detect whether `amount` is expressed in minor units
-    # (kopecks/cents) or major units, from that field's own description —
-    # getting this wrong means every generated payout is off by 100x, so
-    # when the description gives no hint, the unit is :unresolved rather
-    # than assumed.
+    # сопоставляет поля провайдера с каноническими именами
+    # единицы суммы определяются по описанию поля; при отсутствии признака остаются :unresolved
     class FieldMapper
       DEFAULT_RULES_PATH = File.join(__dir__, "..", "config", "keyword_dictionaries.yml")
 
-      # amount/currency/external_id/phone are expected on essentially any
-      # payout API — their absence is worth a warning. bank_code/bank_name/
-      # card_number are legitimately conditional (e.g. NovaPay only requires
-      # bank_code for type=sbp, card_number for type=card) — silently
-      # absent is normal, not a warning.
+      # amount/currency/external_id/phone считаются обязательными для выплаты
+      # bank_code/bank_name/card_number могут зависеть от типа реквизитов
       REQUIRED_CANONICAL_FIELDS = %w[amount currency external_id phone].freeze
       OPTIONAL_RECIPIENT_FIELDS = %w[bank_code bank_name card_number].freeze
 
@@ -34,16 +23,11 @@ module Integrator
 
       attr_reader :warnings
 
-      # request_schema: Integrator::Spec::Schema — the request body schema
-      # of the endpoint the classifier assigned role=:create.
+      # request_schema — схема тела запроса эндпоинта :create
       def map(request_schema)
         top_level = request_schema.properties || {}
-        # Recipient sub-fields (phone, bank_code, ...) usually live inside a
-        # nested object (NovaPay's "recipient"), but nothing requires that —
-        # a flatter spec might put "msisdn" right at the top level. Search
-        # whichever nested object looks recipient-shaped, and fall back to
-        # the top level itself if none is found, so both shapes work.
-        recipient_properties = find_recipient_like_properties(top_level) || top_level
+        container_field, container_schema = find_recipient_container(top_level)
+        recipient_properties = container_schema&.properties || top_level
 
         amount_field = find_field(top_level, "amount", required: true)
 
@@ -52,6 +36,7 @@ module Integrator
           amount_unit: amount_field ? detect_amount_unit(top_level[amount_field]) : :unresolved,
           currency_field: find_field(top_level, "currency", required: true),
           external_id_field: find_field(top_level, "external_id", required: true),
+          recipient_container_field: container_field, # nil означает плоские поля.
           recipient_fields: map_recipient_fields(recipient_properties)
         )
       end
@@ -66,19 +51,20 @@ module Integrator
           @warnings.add(
             stage: :field_mapping,
             subject: canonical_name,
-            reason: "поле не найдено среди #{properties.keys.inspect} (искали алиасы #{aliases.inspect})"
+            reason: "поле не найдено"
           )
         end
 
         match
       end
 
-      def find_recipient_like_properties(top_level)
-        candidate = top_level.values.find do |schema|
+      # возвращает контейнер реквизитов или [nil, nil], если поля находятся на верхнем уровне
+      def find_recipient_container(top_level)
+        entry = top_level.find do |_name, schema|
           schema.type == "object" && schema.properties&.any? &&
             (@field_aliases["phone"] + @field_aliases["card_number"]).any? { |alias_name| schema.properties.key?(alias_name) }
         end
-        candidate&.properties
+        entry || [nil, nil]
       end
 
       def map_recipient_fields(properties)
@@ -96,8 +82,7 @@ module Integrator
         @warnings.add(
           stage: :field_mapping,
           subject: "amount unit",
-          reason: "в описании поля суммы (#{amount_schema.description.inspect}) нет ключевых слов " \
-                  "минимальных/основных единиц — уточните вручную, иначе конвертация суммы будет неверной"
+          reason: "единица суммы не определена по описанию поля — уточните вручную"
         )
         :unresolved
       end

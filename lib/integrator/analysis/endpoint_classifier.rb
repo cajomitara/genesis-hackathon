@@ -4,21 +4,13 @@ require_relative "warning_collector"
 
 module Integrator
   module Analysis
-    # Assigns each Spec::Endpoint a role by scoring it against keyword rules
-    # loaded from config/keyword_dictionaries.yml. Nothing here is
-    # NovaPay-specific — the rules are generic path/method/tag/schema shapes,
-    # and the dictionary is data, not code, so a differently-worded spec
-    # just needs new keywords, not new logic.
-    #
-    # Every endpoint gets exactly one EndpointAnalysis. If nothing matches,
-    # the role is :unclassified and a Warning is recorded — classification
-    # never raises and never silently drops an endpoint.
+    # назначает роль эндпоинту по правилам из config/keyword_dictionaries.yml
+    # каждый эндпоинт получает один EndpointAnalysis; при отсутствии совпадения сохраняется :unclassified и предупреждение
     class EndpointClassifier
       DEFAULT_RULES_PATH = File.join(__dir__, "..", "config", "keyword_dictionaries.yml")
 
-      # Order matters only in that it's the order candidate roles are tried
-      # in; roles are mutually exclusive by method/shape in practice (e.g.
-      # :cancel requires POST/DELETE, :status requires GET), so ties are rare.
+      # роли проверяются в заданном порядке
+      # на практике они различаются по методу и форме эндпоинта
       ROLE_ORDER = %i[callback cancel status balance create].freeze
 
       def initialize(rules_path: DEFAULT_RULES_PATH, warnings: WarningCollector.new)
@@ -46,23 +38,18 @@ module Integrator
         @warnings.add(
           stage: :classification,
           subject: "#{endpoint.method} #{endpoint.path}",
-          reason: "no role rule matched (tags=#{endpoint.tags.inspect}, " \
-                  "operation_id=#{endpoint.operation_id.inspect}) — review manually " \
-                  "or add a keyword to config/keyword_dictionaries.yml"
+          reason: "правило классификации не найдено"
         )
-        { role: :unclassified, confidence: :low, matched_rule: "no rule matched" }
+        { role: :unclassified, confidence: :low, matched_rule: "правило не найдено" }
       end
 
-      # ---- shape helpers -------------------------------------------------
-
+      # вспомогательные проверки формы
       def has_path_param?(path)
         path.include?("{")
       end
 
-      # True only when the path *ends* in a bare {param} segment, e.g.
-      # "/payouts/{payout_id}" — but not "/payouts/{payout_id}/receipt",
-      # which is a different action performed *on* that resource, not a
-      # plain status lookup.
+      # true, если путь заканчивается параметром, например "/payouts/{payout_id}"
+      # путь с дополнительным сегментом не считается запросом статуса
       def last_segment_is_param?(path)
         path.split("/").last =~ /\A\{[^}]+\}\z/
       end
@@ -75,8 +62,8 @@ module Integrator
         haystacks.compact.any? { |h| keywords.any? { |k| h.downcase.include?(k) } }
       end
 
-      # ---- high-confidence rules ------------------------------------------
-      # Each returns nil (no match) or {role:, confidence:, matched_rule:}.
+      # правила с высокой уверенностью.
+      # возвращает nil или данные выбранного правила.
 
       def match_high(role, endpoint)
         send("match_#{role}_high", endpoint)
@@ -84,10 +71,10 @@ module Integrator
 
       def match_callback_high(e)
         rules = @rules["callback"]
-        return nil unless e.security == [] # explicit public — real requirement, not "unspecified"
+        return nil unless e.security == []
         return nil unless keyword_match?([e.path] + e.tags, rules["path_keywords"] + rules["tag_keywords"])
 
-        rule("callback", :high, "security is explicitly [] and path/tags mention #{rules['path_keywords']}")
+        rule("callback", :high, "security: [] и ключевое слово callback/webhook")
       end
 
       def match_cancel_high(e)
@@ -95,14 +82,14 @@ module Integrator
         return nil unless %w[POST DELETE].include?(e.method)
         return nil unless path_ends_with_suffix?(e.path, rules["path_suffixes"])
 
-        rule("cancel", :high, "#{e.method} and path ends with one of #{rules['path_suffixes']}")
+        rule("cancel", :high, "#{e.method}, путь заканчивается на суффикс отмены")
       end
 
       def match_status_high(e)
         return nil unless e.method == "GET"
         return nil unless last_segment_is_param?(e.path)
 
-        rule("status", :high, "GET and the final path segment is a bare {parameter}")
+        rule("status", :high, "GET, последний сегмент пути — параметр")
       end
 
       def match_balance_high(e)
@@ -111,7 +98,7 @@ module Integrator
         return nil if has_path_param?(e.path)
         return nil unless keyword_match?([e.path, e.operation_id] + e.tags, rules["path_keywords"] + rules["tag_keywords"])
 
-        rule("balance", :high, "GET, no path parameter, path/tags/operationId mention #{rules['path_keywords']}")
+        rule("balance", :high, "GET без параметра пути, ключевое слово баланса")
       end
 
       def match_create_high(e)
@@ -120,12 +107,11 @@ module Integrator
         return nil if has_path_param?(e.path)
         return nil unless keyword_match?([e.path] + e.tags, rules["path_keywords"] + rules["tag_keywords"])
 
-        rule("create", :high, "POST, no path parameter, path/tags mention #{rules['path_keywords']}")
+        rule("create", :high, "POST без параметра пути, ключевое слово создания")
       end
 
-      # ---- medium-confidence fallbacks ------------------------------------
-      # Only tried when no high-confidence rule matched anything.
-
+      # запасные правила со средней уверенностью
+      # применяются только после правил с высокой уверенностью
       def match_medium(role, endpoint)
         meth = "match_#{role}_medium"
         respond_to?(meth, true) ? send(meth, endpoint) : nil
@@ -139,7 +125,7 @@ module Integrator
         aliases = @rules["create"]["amount_field_aliases"]
         return nil unless e.request_schema.properties.keys.any? { |field| aliases.include?(field.downcase) }
 
-        rule("create", :medium, "POST, no path parameter, request body has an amount-like field (#{aliases})")
+        rule("create", :medium, "POST без параметра пути, в теле есть поле суммы")
       end
 
       def match_balance_medium(e)
@@ -149,7 +135,7 @@ module Integrator
         ok_schema = e.responses[200]&.schema
         return nil unless ok_schema&.properties&.key?("balance")
 
-        rule("balance", :medium, "GET, no path parameter, 200 response body has a 'balance' field")
+        rule("balance", :medium, "GET без параметра пути, в ответе 200 есть balance")
       end
 
       def rule(role, confidence, description)

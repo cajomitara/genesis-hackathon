@@ -2,10 +2,7 @@ require_relative "models"
 
 module Integrator
   module Analysis
-    # Accumulates Warning records across every analyzer. Never raises, never
-    # drops a record — the whole point is that "couldn't decide" is always
-    # visible, both in the CLI's stdout and in the generated INTEGRATION.md,
-    # instead of failing the run or being silently skipped.
+    # собирает предупреждения всех анализаторов
     class WarningCollector
       def initialize
         @warnings = []

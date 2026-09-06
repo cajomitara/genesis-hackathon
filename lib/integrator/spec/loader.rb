@@ -5,7 +5,8 @@ require_relative "ref_resolver"
 
 module Integrator
   module Spec
-    # Преобразует yaml -> Spec::ParsedSpec + проверяет yaml на валидность ()
+    # преобразует yaml в Spec::ParsedSpec
+    # только этот этап завершает запуск при некорректной спецификации, дальше неопределённости идут в предупреждения
     class Loader
       class InvalidSpecError < StandardError; end
 
@@ -104,11 +105,8 @@ module Integrator
         )
       end
 
-      # nil at the operation level means "not specified here" -> falls back
-      # to the document's top-level `security:`. An explicit `security: []`
-      # is preserved as [] (== "this operation is public"), which is
-      # different from nil and matters to the classifier (public + POST
-      # + "webhook"/"callback" naming is a strong signal for role=:callback).
+      # nil на уровне операции означает наследование верхнеуровневого security
+      # security: [] сохраняется отдельно и означает публичную операцию
       def extract_security(op_security)
         requirements = op_security.nil? ? @global_security : op_security
         (requirements || []).flat_map(&:keys)
@@ -189,13 +187,6 @@ module Integrator
         named + single
       end
 
-      # OpenAPI 3.1 top-level `webhooks:` map. OpenAPI 3.0 specs (like
-      # NovaPay's, in this project) have no such key — their webhook is
-      # just a regular path (e.g. POST /webhooks/payout) with
-      # `security: []`, and it will show up in `endpoints` like any other
-      # operation. Recognizing *that* an endpoint plays the webhook/callback
-      # role is a classification decision, not a parsing fact — it belongs
-      # to Analysis::EndpointClassifier, not here.
       def build_webhooks(webhooks)
         (webhooks || {}).flat_map do |name, path_item|
           next [] unless path_item.is_a?(Hash)
