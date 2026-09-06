@@ -8,7 +8,6 @@ require_relative "field_mapper"
 module Integrator
   module Analysis
     # связывает роли эндпоинтов со схемами для маппинга
-    # генерация получает уже готовый результат
     class SpecAnalyzer
       def initialize(parsed_spec, warnings: WarningCollector.new)
         @spec = parsed_spec
