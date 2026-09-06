@@ -1,0 +1,139 @@
+openapi: 3.0.3
+info:
+  title: Orbit Transfer Gateway
+  version: "1.0"
+servers:
+  - url: https://gateway.orbit-pay.test/api
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    TransferRequest:
+      type: object
+      required: [value, currency, merchant_reference, beneficiary]
+      properties:
+        value:
+          type: integer
+          description: Transfer value in cents.
+          minimum: 500
+        currency:
+          type: string
+        merchant_reference:
+          type: string
+        beneficiary:
+          type: object
+          properties:
+            phone_number:
+              type: string
+            routing_code:
+              type: string
+    Transfer:
+      type: object
+      properties:
+        transfer_ref:
+          type: string
+        status:
+          type: string
+          enum: [pending, in_progress, completed, failed]
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+          enum: [bad_request, balance_low, temporarily_unavailable]
+        message:
+          type: string
+paths:
+  /transfers:
+    post:
+      operationId: initiateTransfer
+      tags: [transfers]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+      responses:
+        "201":
+          description: Transfer created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transfer'
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        "503":
+          description: Temporary provider failure
+  /transfers/{transfer_ref}:
+    get:
+      operationId: inspectTransfer
+      tags: [transfers]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: transfer_ref
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transfer status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transfer'
+  /transfers/{transfer_ref}/reverse:
+    post:
+      operationId: reverseTransfer
+      tags: [transfers]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: transfer_ref
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transfer reversed
+  /events/transfer:
+    post:
+      operationId: transferEvent
+      tags: [events]
+      security: []
+      parameters:
+        - in: header
+          name: X-Orbit-Signature
+          required: true
+          schema:
+            type: string
+          description: HMAC-SHA256 signature calculated over the raw JSON body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event_type:
+                  type: string
+                  enum: [transfer.completed, transfer.failed, transfer.in_progress]
+                transfer_ref:
+                  type: string

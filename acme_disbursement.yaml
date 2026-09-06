@@ -1,0 +1,146 @@
+openapi: 3.0.3
+info:
+  title: Acme Disbursement API
+  version: "1.0"
+servers:
+  - url: https://api.acme-pay.test/v1
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  schemas:
+    CreateDisbursementRequest:
+      type: object
+      required: [sum, currency, external_reference, recipient]
+      properties:
+        sum:
+          type: integer
+          description: Amount in cents.
+          minimum: 100
+        currency:
+          type: string
+          example: RUB
+        external_reference:
+          type: string
+        recipient:
+          type: object
+          required: [msisdn]
+          properties:
+            msisdn:
+              type: string
+            bank_code:
+              type: string
+    DisbursementResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+          enum: [queued, processing, paid, declined, cancelled]
+        error_code:
+          type: string
+    ErrorResponse:
+      type: object
+      properties:
+        error_code:
+          type: string
+          enum: [invalid_request, insufficient_funds, provider_unavailable]
+        message:
+          type: string
+paths:
+  /disbursements:
+    post:
+      operationId: createDisbursement
+      tags: [disbursement]
+      security:
+        - apiKey: []
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDisbursementRequest'
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisbursementResponse'
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: Rate limited
+        "500":
+          description: Provider failure
+  /disbursements/{reference}:
+    get:
+      operationId: getDisbursement
+      tags: [disbursement]
+      security:
+        - apiKey: []
+      parameters:
+        - in: path
+          name: reference
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisbursementResponse'
+  /disbursements/{reference}/void:
+    post:
+      operationId: voidDisbursement
+      tags: [disbursement]
+      security:
+        - apiKey: []
+      parameters:
+        - in: path
+          name: reference
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Cancelled
+  /notifications/disbursement:
+    post:
+      operationId: disbursementNotification
+      tags: [callback]
+      security: []
+      parameters:
+        - in: header
+          name: X-Acme-Signature
+          required: true
+          schema:
+            type: string
+          description: HMAC-SHA256 signature of the raw request body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event:
+                  type: string
+                  enum: [disbursement.paid, disbursement.failed, disbursement.processing]
+                reference:
+                  type: string
